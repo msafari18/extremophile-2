@@ -1,48 +1,37 @@
-import torch
-from torchvision import datasets, transforms
-import numpy as np
 from clustpy.deep import ENRC
-import matplotlib.pyplot as plt
-from sklearn.manifold import TSNE
+from src.utils import kmersFasta
+import numpy as np
 
-# Load the MNIST dataset
-transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
-mnist_data = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
 
-# Convert the dataset to a NumPy array
-data = mnist_data.data.numpy().reshape(-1, 28*28) / 255.0  # Normalize pixel values to [0, 1]
-data = torch.tensor(data, dtype=torch.float)
+def run(num_clusters_list, fasta_file, max_k, result_folder):
+    results_json = {}
+    for k in range(1, max_k + 1):
+        results_json[k] = {}
+        _, kmers = kmersFasta(fasta_file, k=k, transform=None, reduce=True)
+        kmers_normalized = np.transpose((np.transpose(kmers) / np.linalg.norm(kmers, axis=1)))
+        cluster_assignments, verbose_enrc_model, embeddings = perform_deep_clustering(kmers_normalized, num_clusters_list)
+        results_json[k] = (cluster_assignments, verbose_enrc_model, embeddings)
+        print(f"Finished processing k = {k}", flush=True)
 
-# Print the shape of the data
-print("Dataset shape:", data.shape)
+    return results_json
 
-# Define the number of clusters for each aspect
-n_clusters_list = [2, 10, 2]  # Clusters for digit shape/style, digit class, and intensity/stroke width
 
-# Initialize the ENRC model
-enrc_model = ENRC(n_clusters_list)
 
-# Fit the model
-enrc_model.fit(data)
 
-# Get the cluster assignments
-cluster_assignments = enrc_model.predict(data)
+def perform_deep_clustering(data, n_clusters_list):
 
-# Get the embeddings
-embeddings = enrc_model.embeddings_
 
-# Print the shape of the embeddings to verify
-print("Embeddings shape:", embeddings.shape)
+    print("training started")
+    # Initialize the Verbose ENRC model
+    verbose_enrc_model = ENRC(n_clusters_list)
 
-# Apply t-SNE to the embeddings
-tsne = TSNE(n_components=2)
-embeddings_2d = tsne.fit_transform(embeddings)
+    model = verbose_enrc_model.fit(data)
+    # embeddings = enrc.encoder.predict(data)
 
-# Plot the embeddings (using the first aspect for coloring)
-plt.figure(figsize=(10, 7))
-plt.scatter(embeddings_2d[:, 0], embeddings_2d[:, 1], c=cluster_assignments[0], cmap='viridis')
-plt.colorbar(label='Cluster Label')
-plt.title("t-SNE visualization of embeddings")
-plt.xlabel("t-SNE Component 1")
-plt.ylabel("t-SNE Component 2")
-plt.show()
+    embeddings = model.autoencoder.encode(data)
+    # Get the cluster assignments with verbose output
+    cluster_assignments = verbose_enrc_model.predict(data)
+
+    embeddings = embeddings.cpu().detach().numpy()
+
+    return cluster_assignments, verbose_enrc_model, embeddings
